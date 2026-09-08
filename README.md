@@ -156,10 +156,4 @@ CREATE TABLE entrada_estoque (
 
 ---
 
-## 📄 Licença
-
-Este projeto é distribuído sob a licença MIT. Consulte o arquivo `LICENSE` para mais detalhes.
-
----
-
 <p align="center">Desenvolvido com ❤️ em Flutter</p>
