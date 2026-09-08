@@ -156,4 +156,3 @@ CREATE TABLE entrada_estoque (
 
 ---
 
-<p align="center">Desenvolvido com ❤️ em Flutter</p>
