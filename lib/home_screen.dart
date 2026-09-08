@@ -252,7 +252,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final itens = await supabase
           .from('itens_venda')
-          .select('id')
+          .select('produto_id')
           .eq('produto_id', id);
       totalVendasVinculadas = (itens as List).length;
     } catch (_) {}
@@ -329,7 +329,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // 2. Limpar itens_venda vinculados
         final itens = await supabase
             .from('itens_venda')
-            .select('id, venda_id, subtotal')
+            .select('venda_id, subtotal')
             .eq('produto_id', id);
 
         if ((itens as List).isNotEmpty) {
@@ -340,7 +340,7 @@ class _HomeScreenState extends State<HomeScreen> {
           for (final vid in vendaIds) {
             final outrosItens = await supabase
                 .from('itens_venda')
-                .select('id, subtotal')
+                .select('subtotal')
                 .eq('venda_id', vid)
                 .neq('produto_id', id);
 
