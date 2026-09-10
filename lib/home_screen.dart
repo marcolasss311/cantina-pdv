@@ -44,7 +44,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (mounted) {
         setState(() {
-          _produtos = List<Map<String, dynamic>>.from(data);
+          _produtos = List<Map<String, dynamic>>.from(data)
+              .where((p) => !(p['codigo_barras'] ?? '').toString().startsWith('__EXCLUIDO__'))
+              .toList();
           _produtoPastaMap = pastaMap;
           _isLoading = false;
           _temErro = false;
@@ -243,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Confirmar exclusão do produto com limpeza de dependências
+  // Confirmar exclusão do produto preservando o histórico de vendas
   Future<void> _confirmarExclusao(String id, String nome) async {
     final supabase = Supabase.instance.client;
 
@@ -275,30 +277,39 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Tem certeza que deseja excluir o produto "$nome"?'),
-            if (totalVendasVinculadas > 0) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.amber.shade300),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Este produto possui $totalVendasVinculadas registro(s) em vendas passadas. Ao excluir, seus registros de venda e movimentações serão limpos com segurança.',
-                        style: TextStyle(fontSize: 12, color: Colors.amber.shade900),
-                      ),
-                    ),
-                  ],
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: totalVendasVinculadas > 0 ? Colors.green.shade50 : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: totalVendasVinculadas > 0 ? Colors.green.shade300 : Colors.grey.shade300,
                 ),
               ),
-            ],
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    totalVendasVinculadas > 0 ? Icons.check_circle_outline : Icons.info_outline,
+                    color: totalVendasVinculadas > 0 ? Colors.green.shade700 : Colors.grey.shade700,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      totalVendasVinculadas > 0
+                          ? 'Este produto possui $totalVendasVinculadas registro(s) em vendas passadas. Ele será removido do catálogo e da tela de vendas, mas todo o seu histórico de vendas e lucros passados continuará 100% PRESERVADO!'
+                          : 'Este produto nunca foi vendido. Ele será removido definitivamente do banco de dados.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: totalVendasVinculadas > 0 ? Colors.green.shade900 : Colors.black87,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
         actions: [
@@ -312,7 +323,7 @@ class _HomeScreenState extends State<HomeScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Excluir Definitivamente'),
+            child: const Text('Confirmar Exclusão'),
           ),
         ],
       ),
@@ -321,63 +332,44 @@ class _HomeScreenState extends State<HomeScreen> {
     if (confirmar == true) {
       setState(() => _isLoading = true);
       try {
-        // 1. Limpar registros na tabela entrada_estoque (se houver)
-        try {
-          await supabase.from('entrada_estoque').delete().eq('produto_id', id);
-        } catch (_) {}
+        if (totalVendasVinculadas > 0) {
+          // Soft-delete: Mantém o produto na tabela para preservar vendas e relatórios históricos
+          final prodAtual = await supabase
+              .from('produtos')
+              .select('codigo_barras')
+              .eq('id', id)
+              .maybeSingle();
 
-        // 2. Limpar itens_venda vinculados
-        final itens = await supabase
-            .from('itens_venda')
-            .select('venda_id, subtotal')
-            .eq('produto_id', id);
+          final codigoOriginal = prodAtual?['codigo_barras'] ?? '';
+          final codigoExcluido = '__EXCLUIDO__${DateTime.now().millisecondsSinceEpoch}__$codigoOriginal';
 
-        if ((itens as List).isNotEmpty) {
-          final vendaIds = (itens as List)
-              .map((it) => it['venda_id'].toString())
-              .toSet();
-
-          for (final vid in vendaIds) {
-            final outrosItens = await supabase
-                .from('itens_venda')
-                .select('subtotal')
-                .eq('venda_id', vid)
-                .neq('produto_id', id);
-
-            if ((outrosItens as List).isEmpty) {
-              // Se a venda só tinha esse item, removemos a venda
-              await supabase.from('vendas').delete().eq('id', vid);
-            } else {
-              // Se a venda tem outros itens, recalculamos o total da venda
-              final novoTotal = (outrosItens as List).fold<double>(
-                0.0,
-                (acc, it) =>
-                    acc + (double.tryParse(it['subtotal'].toString()) ?? 0.0),
-              );
-              await supabase
-                  .from('vendas')
-                  .update({'valor_total': novoTotal})
-                  .eq('id', vid);
-            }
-          }
-
-          // Exclui os itens_venda do produto
-          await supabase.from('itens_venda').delete().eq('produto_id', id);
+          // Atualiza código de barras (liberando o código original para futuro reuso) e zera estoque
+          await supabase.from('produtos').update({
+            'codigo_barras': codigoExcluido,
+            'quantidade_estoque': 0,
+          }).eq('id', id);
+        } else {
+          // Produto sem histórico: exclusão física direta
+          try {
+            await supabase.from('entrada_estoque').delete().eq('produto_id', id);
+          } catch (_) {}
+          await supabase.from('produtos').delete().eq('id', id);
         }
 
-        // 3. Exclui o produto de produtos
-        await supabase.from('produtos').delete().eq('id', id);
-
-        // 4. Remove a associação de pasta local
+        // Remove a associação de pasta local
         await PastasService.setProdutoPasta(id, null);
 
-        // 5. Recarrega a lista
+        // Recarrega a lista
         await _carregarProdutos();
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Produto "$nome" excluído com sucesso.'),
+              content: Text(
+                totalVendasVinculadas > 0
+                    ? 'Produto "$nome" excluído do catálogo. O histórico de vendas foi mantido!'
+                    : 'Produto "$nome" excluído com sucesso.',
+              ),
               backgroundColor: Colors.green,
             ),
           );
@@ -394,6 +386,164 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     }
+  }
+
+  // Diálogo para reiniciar do zero todas as vendas mantendo os produtos
+  Future<void> _abrirDialogoZerarVendas() async {
+    final textController = TextEditingController();
+    bool confirmadoHabilitado = false;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Zerar Histórico de Vendas',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green.shade700, size: 20),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Todos os produtos cadastrados e seus estoques continuarão intactos!',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.green),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade300),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.delete_sweep, color: Colors.red.shade700, size: 20),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Todas as vendas passadas, itens vendidos e métricas de lucro serão apagados permanentemente.',
+                          style: TextStyle(fontSize: 12, color: Colors.red),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Para evitar cliques por engano, digite a palavra "cancelar" no campo abaixo para habilitar o botão:',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: textController,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'Digite cancelar aqui',
+                    border: const OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    helperText: confirmadoHabilitado
+                        ? '✓ Palavra correta! Botão liberado.'
+                        : 'Digite exatamente: cancelar',
+                    helperStyle: TextStyle(
+                      color: confirmadoHabilitado ? Colors.green.shade800 : Colors.grey,
+                      fontWeight: confirmadoHabilitado ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  onChanged: (val) {
+                    final libera = val.trim().toLowerCase() == 'cancelar';
+                    if (libera != confirmadoHabilitado) {
+                      setDialogState(() => confirmadoHabilitado = libera);
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Voltar'),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.grey.shade300,
+                disabledForegroundColor: Colors.grey.shade500,
+              ),
+              icon: const Icon(Icons.delete_sweep, size: 18),
+              label: const Text('Zerar Todas as Vendas'),
+              onPressed: confirmadoHabilitado
+                  ? () async {
+                      final scaffoldMessenger = ScaffoldMessenger.of(context);
+                      Navigator.pop(ctx);
+                      setState(() => _isLoading = true);
+                      try {
+                        final supabase = Supabase.instance.client;
+                        await supabase.from('itens_venda').delete().gte('quantidade_vendida', 0);
+                        await supabase.from('vendas').delete().gte('valor_total', 0);
+
+                        if (mounted) {
+                          scaffoldMessenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Histórico de vendas zerado com sucesso! Seus produtos e estoque continuam intactos.'),
+                              backgroundColor: Colors.green,
+                              duration: Duration(seconds: 4),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          scaffoldMessenger.showSnackBar(
+                            SnackBar(
+                              content: Text('Erro ao zerar vendas: $e'),
+                              backgroundColor: Colors.redAccent,
+                            ),
+                          );
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() => _isLoading = false);
+                        }
+                      }
+                    }
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -518,6 +668,19 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.pop(context);
                 _carregarProdutos();
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.restart_alt, color: Colors.red),
+              title: const Text(
+                'Zerar Histórico de Vendas',
+                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+              ),
+              subtitle: const Text('Reiniciar vendas mantendo produtos e estoque'),
+              onTap: () {
+                Navigator.pop(context);
+                _abrirDialogoZerarVendas();
               },
             ),
           ],

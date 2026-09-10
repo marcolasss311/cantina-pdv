@@ -4,7 +4,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 enum PeriodoFiltro { hoje, semana, mes, geral }
 
 class HistoricoVendasScreen extends StatefulWidget {
-  const HistoricoVendasScreen({super.key});
+  final int initialIndex;
+  const HistoricoVendasScreen({super.key, this.initialIndex = 0});
 
   @override
   State<HistoricoVendasScreen> createState() => _HistoricoVendasScreenState();
@@ -21,16 +22,29 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
   PeriodoFiltro _filtroSelecionado = PeriodoFiltro.geral;
   int _limiteVendasExibidas = 5; // Carrega de 5 em 5 vendas para manter o app leve
 
+  // Controle da aba de Zerar Vendas
+  final TextEditingController _zerarConfirmacaoController = TextEditingController();
+  bool _zerarBotaoHabilitado = false;
+  bool _isZerando = false;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialIndex.clamp(0, 2),
+    );
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     _carregarDados();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _zerarConfirmacaoController.dispose();
     super.dispose();
   }
 
@@ -559,10 +573,11 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
           indicatorColor: Colors.amber,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white70,
-          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
           tabs: const [
             Tab(icon: Icon(Icons.receipt_long), text: 'Vendas'),
-            Tab(icon: Icon(Icons.bar_chart), text: 'Relatório por Produto'),
+            Tab(icon: Icon(Icons.bar_chart), text: 'Por Produto'),
+            Tab(icon: Icon(Icons.restart_alt), text: 'Zerar Vendas'),
           ],
         ),
       ),
@@ -574,58 +589,60 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
                 ? _buildErrorView()
                 : Column(
                   children: [
-                    // Seletor de Período: Hoje | Semana | Mês | Geral
-                    Container(
-                      color: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
+                    if (_tabController.index != 2) ...[
+                      // Seletor de Período: Hoje | Semana | Mês | Geral
+                      Container(
+                        color: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _buildFilterChip('Hoje', PeriodoFiltro.hoje),
+                              const SizedBox(width: 8),
+                              _buildFilterChip('Esta Semana (7d)', PeriodoFiltro.semana),
+                              const SizedBox(width: 8),
+                              _buildFilterChip('Este Mês (30d)', PeriodoFiltro.mes),
+                              const SizedBox(width: 8),
+                              _buildFilterChip('Geral (Tudo)', PeriodoFiltro.geral),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Cards de Faturamento e Lucro do Período Selecionado
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                         child: Row(
                           children: [
-                            _buildFilterChip('Hoje', PeriodoFiltro.hoje),
-                            const SizedBox(width: 8),
-                            _buildFilterChip('Esta Semana (7d)', PeriodoFiltro.semana),
-                            const SizedBox(width: 8),
-                            _buildFilterChip('Este Mês (30d)', PeriodoFiltro.mes),
-                            const SizedBox(width: 8),
-                            _buildFilterChip('Geral (Tudo)', PeriodoFiltro.geral),
+                            Expanded(
+                              child: _buildMetricCard(
+                                titulo: 'Faturamento',
+                                valor: 'R\$ ${_faturamentoPeriodo.toStringAsFixed(2)}',
+                                subtitulo: '${vendasFiltradas.length} vendas',
+                                cor: Colors.blue.shade700,
+                                icone: Icons.point_of_sale,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildMetricCard(
+                                titulo: 'Lucro Líquido',
+                                valor: 'R\$ ${_lucroPeriodo.toStringAsFixed(2)}',
+                                subtitulo: _faturamentoPeriodo > 0
+                                    ? 'Custo: R\$ ${_custoPeriodo.toStringAsFixed(2)} (${((_lucroPeriodo / _faturamentoPeriodo) * 100).toStringAsFixed(0)}% margem)'
+                                    : 'Custo: R\$ 0,00',
+                                cor: Colors.green.shade700,
+                                icone: Icons.trending_up,
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                    ),
 
-                    // Cards de Faturamento e Lucro do Período Selecionado
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _buildMetricCard(
-                              titulo: 'Faturamento',
-                              valor: 'R\$ ${_faturamentoPeriodo.toStringAsFixed(2)}',
-                              subtitulo: '${vendasFiltradas.length} vendas',
-                              cor: Colors.blue.shade700,
-                              icone: Icons.point_of_sale,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildMetricCard(
-                              titulo: 'Lucro Líquido',
-                              valor: 'R\$ ${_lucroPeriodo.toStringAsFixed(2)}',
-                              subtitulo: _faturamentoPeriodo > 0
-                                  ? 'Custo: R\$ ${_custoPeriodo.toStringAsFixed(2)} (${((_lucroPeriodo / _faturamentoPeriodo) * 100).toStringAsFixed(0)}% margem)'
-                                  : 'Custo: R\$ 0,00',
-                              cor: Colors.green.shade700,
-                              icone: Icons.trending_up,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Card de Faturamento por Forma de Pagamento
-                    _buildCardFormasPagamento(),
+                      // Card de Faturamento por Forma de Pagamento
+                      _buildCardFormasPagamento(),
+                    ],
 
                     // Conteúdo das Abas
                     Expanded(
@@ -634,6 +651,7 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
                         children: [
                           _buildAbaVendas(vendasFiltradas),
                           _buildAbaRelatorioProdutos(vendasFiltradas),
+                          _buildAbaZerarVendas(),
                         ],
                       ),
                     ),
@@ -877,6 +895,7 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
     // 1. Inicializa com todos os produtos cadastrados (mostrando estoque)
     for (final p in _todosProdutos) {
       final id = p['id'].toString();
+      final isExcluido = (p['codigo_barras'] ?? '').toString().startsWith('__EXCLUIDO__');
       relatorioPorProduto[id] = {
         'nome': p['nome'] ?? 'Sem nome',
         'estoque': int.tryParse(p['quantidade_estoque'].toString()) ?? 0,
@@ -885,6 +904,7 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
         'qtd_vendida': 0,
         'faturamento': 0.0,
         'lucro': 0.0,
+        'is_excluido': isExcluido,
       };
     }
 
@@ -898,20 +918,37 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
         final qtd = (it['quantidade_vendida'] as num?)?.toInt() ?? 0;
         final subtotal = (it['subtotal'] as num?)?.toDouble() ?? 0.0;
 
-        if (relatorioPorProduto.containsKey(prodId)) {
-          final reg = relatorioPorProduto[prodId]!;
-          final custoUnit = reg['preco_custo'] as double;
-          final custoItem = custoUnit * qtd;
-
-          reg['qtd_vendida'] = (reg['qtd_vendida'] as int) + qtd;
-          reg['faturamento'] = (reg['faturamento'] as double) + subtotal;
-          reg['lucro'] = (reg['lucro'] as double) + (subtotal - custoItem);
+        if (!relatorioPorProduto.containsKey(prodId)) {
+          final prod = it['produtos'] as Map<String, dynamic>?;
+          final nomeProd = prod?['nome'] ?? 'Produto';
+          final precoCusto = (prod?['preco_custo'] as num?)?.toDouble() ?? 0.0;
+          final precoVenda = (prod?['preco_venda'] as num?)?.toDouble() ?? 0.0;
+          relatorioPorProduto[prodId] = {
+            'nome': nomeProd,
+            'estoque': 0,
+            'preco_custo': precoCusto,
+            'preco_venda': precoVenda,
+            'qtd_vendida': 0,
+            'faturamento': 0.0,
+            'lucro': 0.0,
+            'is_excluido': true,
+          };
         }
+
+        final reg = relatorioPorProduto[prodId]!;
+        final custoUnit = reg['preco_custo'] as double;
+        final custoItem = custoUnit * qtd;
+
+        reg['qtd_vendida'] = (reg['qtd_vendida'] as int) + qtd;
+        reg['faturamento'] = (reg['faturamento'] as double) + subtotal;
+        reg['lucro'] = (reg['lucro'] as double) + (subtotal - custoItem);
       }
     }
 
-    // Ordena os produtos: primeiro os mais vendidos, depois por nome
-    final listaRelatorio = relatorioPorProduto.values.toList()
+    // Ordena os produtos: primeiro os mais vendidos, depois por nome (ocultando excluídos com 0 vendas)
+    final listaRelatorio = relatorioPorProduto.values
+        .where((item) => !(item['is_excluido'] as bool) || (item['qtd_vendida'] as int) > 0)
+        .toList()
       ..sort((a, b) {
         final compQtd = (b['qtd_vendida'] as int).compareTo(a['qtd_vendida'] as int);
         if (compQtd != 0) return compQtd;
@@ -930,6 +967,7 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
           final qtdVendida = item['qtd_vendida'] as int;
           final faturamento = item['faturamento'] as double;
           final lucro = item['lucro'] as double;
+          final isExcluido = item['is_excluido'] == true;
 
           return Card(
             margin: const EdgeInsets.only(bottom: 10),
@@ -943,26 +981,53 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          nome,
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        child: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                nome,
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (isExcluido) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.orange.shade300),
+                                ),
+                                child: Text(
+                                  'Excluído',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.orange.shade900,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: estoque > 0 ? Colors.indigo.shade50 : Colors.red.shade50,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          '$estoque un. em estoque',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: estoque > 0 ? Colors.indigo : Colors.red,
+                      if (!isExcluido)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: estoque > 0 ? Colors.indigo.shade50 : Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '$estoque un. em estoque',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: estoque > 0 ? Colors.indigo : Colors.red,
+                            ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                   const Divider(height: 18),
@@ -1238,4 +1303,266 @@ class _HistoricoVendasScreenState extends State<HistoricoVendasScreen> with Sing
       ],
     );
   }
+
+  // Executa a reinicialização de todas as vendas no banco Supabase
+  Future<void> _executarZerarVendas() async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    setState(() => _isZerando = true);
+    try {
+      final supabase = Supabase.instance.client;
+      // 1. Limpa todos os itens de venda
+      await supabase.from('itens_venda').delete().gte('quantidade_vendida', 0);
+      // 2. Limpa todas as vendas
+      await supabase.from('vendas').delete().gte('valor_total', 0);
+
+      // Limpa o campo de texto e trava o botão
+      _zerarConfirmacaoController.clear();
+      _zerarBotaoHabilitado = false;
+
+      // Recarrega os dados locais
+      await _carregarDados();
+
+      // Alterna para a primeira aba (Vendas)
+      _tabController.animateTo(0);
+
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+            content: Text('Todas as vendas foram zeradas com sucesso! Seus produtos e estoque continuam intactos.'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Erro ao zerar histórico de vendas: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isZerando = false);
+      }
+    }
+  }
+
+  // ABA 3: REINICIAR VENDAS DO ZERO
+  Widget _buildAbaZerarVendas() {
+    if (_isZerando) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: Colors.red),
+            SizedBox(height: 16),
+            Text(
+              'Zerando histórico de vendas...',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _carregarDados,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Card Principal de Aviso
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(12),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+                border: Border.all(color: Colors.red.shade200, width: 1.5),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.restart_alt, size: 42, color: Colors.red.shade700),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Reiniciar Vendas do Zero',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Zere todo o histórico de vendas para iniciar um novo período ou limpar testes realizados no sistema.',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // O QUE É MANTIDO (Verde)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green.shade300),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green.shade700, size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        'O QUE CONTINUA 100% INTACTO:',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    '• Todos os produtos cadastrados e seus nomes\n'
+                    '• Preços de custo e preços de venda\n'
+                    '• Quantidades em estoque físico atual\n'
+                    '• Pastas e categorias organizadas',
+                    style: TextStyle(fontSize: 13, color: Colors.black87, height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // O QUE É APAGADO (Vermelho)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.red.shade300),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.delete_sweep, color: Colors.red.shade700, size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        'O QUE SERÁ REINICIADO DO ZERO:',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    '• Todas as vendas já realizadas e cupons\n'
+                    '• Todos os itens vendidos registrados\n'
+                    '• Faturamento e lucro líquido (voltarão a R\$ 0,00)',
+                    style: TextStyle(fontSize: 13, color: Colors.black87, height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // BLOCO DE CONFIRMAÇÃO DE SEGURANÇA
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _zerarBotaoHabilitado ? Colors.green.shade400 : Colors.grey.shade300,
+                  width: 1.5,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Confirmação de Segurança',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Para confirmar que não foi um toque acidental, digite a palavra "cancelar" no campo abaixo para habilitar o botão:',
+                    style: TextStyle(fontSize: 13, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _zerarConfirmacaoController,
+                    decoration: InputDecoration(
+                      hintText: 'Digite cancelar aqui',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
+                      helperText: _zerarBotaoHabilitado
+                          ? '✓ Palavra correta! Botão liberado abaixo.'
+                          : 'Digite exatamente: cancelar',
+                      helperStyle: TextStyle(
+                        color: _zerarBotaoHabilitado ? Colors.green.shade800 : Colors.grey,
+                        fontWeight: _zerarBotaoHabilitado ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                    onChanged: (val) {
+                      final liberado = val.trim().toLowerCase() == 'cancelar';
+                      if (liberado != _zerarBotaoHabilitado) {
+                        setState(() => _zerarBotaoHabilitado = liberado);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade700,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.grey.shade300,
+                      disabledForegroundColor: Colors.grey.shade500,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.delete_sweep, size: 20),
+                    label: const Text(
+                      'Zerar Todas as Vendas Agora',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: _zerarBotaoHabilitado ? _executarZerarVendas : null,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
+

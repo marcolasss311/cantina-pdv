@@ -63,7 +63,9 @@ class _VendasScreenState extends State<VendasScreen> {
 
       if (mounted) {
         setState(() {
-          _produtos = List<Map<String, dynamic>>.from(data);
+          _produtos = List<Map<String, dynamic>>.from(data)
+              .where((p) => !(p['codigo_barras'] ?? '').toString().startsWith('__EXCLUIDO__'))
+              .toList();
           _pastas = pastas;
           _produtoPastaMap = pastaMap;
           _isLoading = false;

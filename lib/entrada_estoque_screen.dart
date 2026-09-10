@@ -57,28 +57,36 @@ class _EntradaEstoqueScreenState extends State<EntradaEstoqueScreen> {
     });
 
     try {
-      // 1. Tenta buscar por código de barras exato
+      // 1. Tenta buscar por código de barras exato (desconsiderando excluídos)
       var data = await Supabase.instance.client
           .from('produtos')
           .select()
           .eq('codigo_barras', busca)
           .maybeSingle();
 
-      // 2. Se não encontrou por código, busca por nome
+      if (data != null && (data['codigo_barras'] ?? '').toString().startsWith('__EXCLUIDO__')) {
+        data = null;
+      }
+
+      // 2. Se não encontrou por código, busca por nome (filtrando excluídos)
       if (data == null) {
         final listByName = await Supabase.instance.client
             .from('produtos')
             .select()
             .ilike('nome', '%$busca%');
 
-        if (listByName.isNotEmpty) {
-          if (listByName.length == 1) {
-            data = listByName.first;
+        final ativosByName = List<Map<String, dynamic>>.from(listByName)
+            .where((p) => !(p['codigo_barras'] ?? '').toString().startsWith('__EXCLUIDO__'))
+            .toList();
+
+        if (ativosByName.isNotEmpty) {
+          if (ativosByName.length == 1) {
+            data = ativosByName.first;
           } else {
             // Múltiplos produtos encontrados com esse nome: abre o seletor com eles
             if (mounted) {
               setState(() => _isLoading = false);
-              _abrirSeletorProdutoManual(produtosIniciais: List<Map<String, dynamic>>.from(listByName));
+              _abrirSeletorProdutoManual(produtosIniciais: ativosByName);
             }
             return;
           }
@@ -245,13 +253,17 @@ class _EntradaEstoqueScreenState extends State<EntradaEstoqueScreen> {
     Map<String, String> pastaMap = {};
     try {
       if (produtosIniciais != null && produtosIniciais.isNotEmpty) {
-        todosProdutos = produtosIniciais;
+        todosProdutos = produtosIniciais
+            .where((p) => !(p['codigo_barras'] ?? '').toString().startsWith('__EXCLUIDO__'))
+            .toList();
       } else {
         final res = await Supabase.instance.client
             .from('produtos')
             .select()
             .order('nome', ascending: true);
-        todosProdutos = List<Map<String, dynamic>>.from(res);
+        todosProdutos = List<Map<String, dynamic>>.from(res)
+            .where((p) => !(p['codigo_barras'] ?? '').toString().startsWith('__EXCLUIDO__'))
+            .toList();
       }
       pastaMap = await PastasService.getProdutoPastaMap();
     } catch (e) {
